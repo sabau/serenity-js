@@ -201,6 +201,61 @@ serenity: {
 :bulb: **PRO TIP**: You can define your own Stage Crew Members to produce custom reports or integrate 
 with your infrastructure.
 
+## Requirements directory
+
+By default, Serenity/JS assumes that your acceptance tests, in the form of either 
+[Cucumber `*.feature` files](../cucumber/automation.md#location-location-location) 
+or [Mocha `*.spec.ts` files](../mocha/overview.md#directory-structure), 
+are kept in the `features` directory under the project root.
+It also assumes that you run your acceptance tests from the project's root directory. 
+
+This means that the default configuration of the `requirementsDirectory` looks as follows,
+but you can change it to better fit the structure of your project: 
+
+```javascript
+serenity: {
+    requirementsDirectory: `${process.cwd()}/features`
+}
+```
+
+## Output directory
+
+Serenity/JS produces `.json` reports (optionally accompanied by screenshots)
+and stores them in the `target/site/serenity` directory (relative to where you're executing the tests from)
+where they can be processed by [Serenity BDD CLI](https://www.npmjs.com/package/serenity-cli)
+to create the [HTML reports](reporting.md).
+
+This means that the default configuration of the `outputDirectory` looks as follows, but you can change it 
+to better fit the structure of your project:
+
+```javascript
+serenity: {
+    outputDirectory: `${process.cwd()}/target/site/serenity/`
+}
+```
+
+:bulb: **PRO TIP**: To configure a location that's relative to your current working directory (i.e. where you execute
+your test runner, such as Protractor) use [`process.cwd()`](https://nodejs.org/api/process.html#process_process_cwd), 
+for example: `${process.cwd()}/some/relative/path`.
+
+The thing to remember when changing the default output directory, though, is that this will also require you to tell
+Serenity BDD CLI where to look for the reports.
+
+To do this, make sure that you specify the `--source` and `--destination` parameters 
+when [invoking `serenity run`](../from-scripts-to-serenity/making-the-tests-speak-for-themselves.md#scripting-the-reporting):
+
+`serenity run --source my/custom/path --destination my/custom/path`
+
+To find out more about the command line options of [Serenity CLI](https://www.npmjs.com/package/serenity-cli) run:
+
+```
+serenity --help run
+```
+
+:bulb: **PRO TIP**: The `serenity` script mentioned above lives under the `node_modules/.bin` directory,
+so you can either execute it there, or add a `script` to your `package.json`: `scripts: { serenity: "serenity" }`
+and [run it through the npm](https://docs.npmjs.com/cli/run-script): `npm run serenity --help run`. 
+
 ## Timeouts
 
 To ensure that [the contract with Protractor](https://github.com/angular/protractor/blob/master/lib/frameworks/README.md#future-requirements)

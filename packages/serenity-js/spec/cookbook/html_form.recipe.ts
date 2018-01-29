@@ -6,6 +6,7 @@ import { AppServer } from '../support/server';
 
 import { by, protractor } from 'protractor';
 import { Execute } from '../../src/serenity-protractor/screenplay/interactions/execute';
+import { ensureCurrentBrowserIsNot } from './workarounds';
 
 /// [pageobjects]
 class Username {
@@ -90,7 +91,8 @@ describe ('When demonstrating the usage of an HTML form, a test scenario', funct
 
     describe('when a real browser is available', () => {
 
-        before(ensureARealBrowserIsAvailable);
+        // see https://github.com/jan-molak/serenity-js/issues/17
+        before(ensureCurrentBrowserIsNot('phantomjs'));
 
         it('can interact with multi-choice select box', () =>
             james.attemptsTo(
@@ -100,15 +102,4 @@ describe ('When demonstrating the usage of an HTML form, a test scenario', funct
                 expect(james.toSee(Text.of(MultiCountry.Result))).eventually.equal('Poland, France'),
             ])));
     });
-
-    // see https://github.com/jan-molak/serenity-js/issues/17
-    function ensureARealBrowserIsAvailable() {
-        return protractor.browser.driver.getCapabilities().
-            then(capabilities => capabilities.get('browserName')).
-            then(name => {
-                if (name === 'phantomjs') {
-                    this.skip();
-                }
-            });
-    }
 });

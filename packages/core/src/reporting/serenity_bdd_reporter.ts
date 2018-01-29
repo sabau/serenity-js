@@ -4,9 +4,9 @@ import StackTrace = require('stacktrace-js');
 import { StackFrame } from 'stacktrace-js';
 import { Md5 } from 'ts-md5/dist/md5';
 
+import { serenity } from '../';
 import { DomainEvent, Photo, RecordedScene, Result, SceneFinished, Tag } from '../domain';
 import { FileSystem, JSONObject } from '../io';
-import { Default_Path_To_Reports } from '../serenity';
 import { Stage, StageCrewMember } from '../stage';
 import { ActivityPeriod, RehearsalPeriod, ReportExporter, ScenePeriod } from './index';
 import { RehearsalReport } from './rehearsal_report';
@@ -20,8 +20,11 @@ import {
     TagReport,
 } from './serenity_bdd_report';
 
-export function serenityBDDReporter(pathToReports: string = Default_Path_To_Reports): StageCrewMember {
-    return new SerenityBDDReporter(new FileSystem(pathToReports));
+export function serenityBDDReporter(
+    requirementsDirectory: string   = serenity.config.requirementsDirectory,
+    outputDirectory: string         = serenity.config.outputDirectory,
+): StageCrewMember {
+    return new SerenityBDDReporter(requirementsDirectory, new FileSystem(outputDirectory));
 }
 
 export class SerenityBDDReporter implements StageCrewMember {
@@ -29,7 +32,7 @@ export class SerenityBDDReporter implements StageCrewMember {
     private static Events_of_Interest = [ SceneFinished ];
     private stage: Stage;
 
-    constructor(private fs: FileSystem) {
+    constructor(private readonly requirementsDirectory, private readonly fs: FileSystem) {
     }
 
     assignTo(stage: Stage) {
@@ -46,7 +49,7 @@ export class SerenityBDDReporter implements StageCrewMember {
     private persistReport() {
         this.stage.manager.informOfWorkInProgress(
             RehearsalReport.from(this.stage.manager.readNewJournalEntriesAs('SerenityBDDReporter'))
-                .exportedUsing(new SerenityBDDReportExporter())
+                .exportedUsing(new SerenityBDDReportExporter(this.requirementsDirectory))
                 .then((fullReport: FullReport) => Promise.all(
                     fullReport.scenes.map(
                         (scene: SceneReport) => this.fs.store(reportFileNameFor(scene), JSON.stringify(scene)),
@@ -58,10 +61,73 @@ export class SerenityBDDReporter implements StageCrewMember {
 
 function reportFileNameFor(scene: SceneReport): string {
     const id   = scene.id,
-          tags = scene.tags.map(t => `${t.type}:${t.name}`).join('-');
+          tags = (scene.tags || []).map(t => `${t.type}:${t.name}`).join('-');
 
     return Md5.hashStr(`${id}-${tags}`) + '.json';
 }
+
+// todo: extract
+
+class Tags {
+    private readonly tags: Tag[];
+
+    constructor(...tags: Tag[]) {
+        this.tags = tags;
+    }
+
+    ofType(type: string) {
+        return this.tags.filter(tag => tag.type === type);
+    }
+
+    process = (...fns: Array<(tags: Tag[]) => Tag[]>) => fns.reduce((tags, fn) => fn(tags), this.tags);
+}
+
+const splitIssueTags                = (tags: Tag[]) => {
+    const isAnIssue = (tag: Tag): boolean => !! ~['issue', 'issues'].indexOf(tag.type);
+    const breakDownIssues = (tag: Tag) => isAnIssue(tag)
+            ? tag.values.map(issueId => new Tag('issue', [ issueId ]))
+            : tag;
+
+    return _.chain(tags)
+        .map(breakDownIssues)
+        .flatten()
+        .value() as Tag[];
+};
+
+const addCapabilityAndFeatureTags   = (scene: RecordedScene, pathToScenario: string) => (tags: Tag[]) => {
+
+    const nonEmpty = <T>(...elements: T[]) => elements.filter(e => !! e);
+
+    const join   = (...elements: string[]) => nonEmpty(...elements).join('/');
+
+    const underscoresToSpaces   = (dirname: string) => dirname.replace(/_+/g, ' ');
+    const capitaliseFirstLetter = (text: string) => text && text[0].toUpperCase() + text.slice(1);
+
+    const relativePath   = path.dirname(pathToScenario);
+    const subDirectories = (relativePath !== '.')
+        ? relativePath.split(path.sep).map(underscoresToSpaces).map(capitaliseFirstLetter).reverse()
+        : [];
+
+    const feature       = scene.category;
+    const capability    = subDirectories[0];
+    const theme         = subDirectories[1];
+
+    return tags.concat(nonEmpty(
+                        new Tag('feature',      [ join(capability, feature) ]),
+        capability  &&  new Tag('capability',   [ join(theme, capability) ]),
+        theme       &&  new Tag('theme',        [ theme ]),
+    ));
+};
+
+const tagAsManualIfNeeded     = (tags: Tag[]) => tags.concat(...tags.filter(tag => tag.type === 'manual').map(t => new Tag('External Tests', ['Manual'])));
+
+const dashify = (text: string) => text
+    .replace(/([a-z])([A-Z])/g, '$1-$2')
+    .replace(/[ \t\W]/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+
+// / todo: extract
 
 /**
  * Transforms the tree structure of the RehearsalPeriod to a format acceptable by Protractor
@@ -70,6 +136,9 @@ export class SerenityBDDReportExporter implements ReportExporter<JSONObject> {
 
     private errorExporter = new ErrorExporter();
     private photoExporter = new PhotoExporter();
+
+    constructor(private readonly requirementsDirectory) {
+    }
 
     exportRehearsal(node: RehearsalPeriod): PromiseLike<FullReport> {
         return Promise.all(node.children.map(child => child.exportedUsing(this)))
@@ -81,30 +150,48 @@ export class SerenityBDDReportExporter implements ReportExporter<JSONObject> {
     exportScene(node: ScenePeriod): PromiseLike<SceneReport> {
         return Promise.all(node.children.map(child => child.exportedUsing(this)))
             .then((children: ActivityReport[]) => this.errorExporter.tryToExport(node.outcome.error).then(error => {
-                return node.promisedTags().then(tags => ({
-                    id: `${this.dashified(node.value.category)};${this.dashified(node.value.name)}`,
-                    title: node.value.name,
-                    name: node.value.name,
-                    context: tags.filter(tag => tag.type === 'context').map(tag => tag.value).pop(),
-                    description: '',
-                    startTime: node.startedAt,
-                    duration: node.duration(),
-                    testSource: 'cucumber',         // todo: provide the correct test source
-                    manual: false,
-                    result: Result[ node.outcome.result ],
-                    userStory: {
-                        id: this.dashified(node.value.category),
-                        path: path.relative(process.cwd(), node.value.location.path),
-                        storyName: node.value.category,
-                        type: 'feature',
-                    },
-                    tags: this.serialisedTags(tags.concat(node.value.tags).concat(this.featureTags(node.value))),
-                    issues: this.issuesCoveredBy(node.value),
-                    testSteps: children,
+                return node.promisedTags().then(promisedTags => {
 
-                    annotatedResult: Result[ node.outcome.result ],
-                    testFailureCause: error,
-                }));
+                    const
+                        scene   = node.value,
+                        pathToScenario = path.relative(this.requirementsDirectory, scene.location.path),
+
+                        tags    = new Tags(...scene.tags, ...promisedTags),
+                        allTags = tags.process(
+                            splitIssueTags,
+                            tagAsManualIfNeeded,
+                            addCapabilityAndFeatureTags(scene, pathToScenario),
+                        );
+
+                    return ({
+                        id:         this.idOf(node, allTags),
+                        name:       this.idOf(node, allTags),
+
+                        context:    tags.ofType('context').map(tag => tag.value).pop(),
+                        manual:     !! tags.ofType('manual').pop(),
+                        tags:       this.serialisedTags(allTags),
+
+                        title:          scene.name,
+                        description:    '',
+                        startTime:      node.startedAt,
+                        duration:       node.duration(),
+                        testSource:     'cucumber',         // todo: provide the correct test source
+
+                        userStory: {
+                            id:         dashify(scene.category),
+                            path:       pathToScenario,
+                            storyName:  scene.category,
+                            type:       'feature',
+                        },
+
+                        issues:     this.issuesCoveredBy(scene),
+                        testSteps:  children,
+
+                        result:             Result[ node.outcome.result ],
+                        annotatedResult:    Result[ node.outcome.result ],
+                        testFailureCause:   error,
+                    });
+                });
             }));
     }
 
@@ -121,11 +208,15 @@ export class SerenityBDDReportExporter implements ReportExporter<JSONObject> {
             })));
     }
 
-    private dashified = (name: string) => name
-        .replace(/([a-z])([A-Z])/g, '$1-$2')
-        .replace(/[ \t\W]/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .toLowerCase();
+    private idOf(node: ScenePeriod, tags: Tag[]) {
+        const asString = (t: Tag) => !! t.value ? `${ t.type }:${t.value}` : t.type ;
+        const combined = (ts: Tag[]) => (tags || []).map(asString).join(';').replace(' ', '');
+
+        return [
+            node.value.name,
+            combined(tags),
+        ].map(dashify).join(';').replace(/;$/, '');
+    }
 
     private issuesCoveredBy(scene: RecordedScene): string[] {
         const onlyIssueTags = this.isAnIssue,
@@ -134,16 +225,7 @@ export class SerenityBDDReportExporter implements ReportExporter<JSONObject> {
         return _.chain(scene.tags).filter(onlyIssueTags).map(toIssueIds).flatten().uniq().value() as string[];
     }
 
-    // todo: add the capability tag?
-    private featureTags(scene: RecordedScene) {
-        return [
-            new Tag('feature', [scene.category]),
-        ];
-    }
-
     private serialisedTags(tags: Tag[]): TagReport[] {
-
-        const isAnIssue = this.isAnIssue;
 
         function serialise(tag: Tag) {
             const noValue   = (t: Tag) => ({ name: t.type,  type: 'tag' }),
@@ -154,15 +236,7 @@ export class SerenityBDDReportExporter implements ReportExporter<JSONObject> {
                 : withValue(tag);
         }
 
-        function breakDownIssues(tag: Tag) {
-            return isAnIssue(tag)
-                ? tag.values.map(issueId => new Tag('issue', [ issueId ]))
-                : tag;
-        }
-
         return _.chain(tags)
-            .map(breakDownIssues)
-            .flatten()
             .map(serialise)
             .uniqBy('name')
             .value();

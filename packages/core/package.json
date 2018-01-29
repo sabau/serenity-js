@@ -1,6 +1,6 @@
 {
   "name": "@serenity-js/core",
-  "version": "1.4.0",
+  "version": "1.5.9",
   "description": "Serenity/JS: Next generation acceptance testing library for modern web applications.",
   "author": "Jan Molak <jan.molak@smartcodeltd.co.uk>",
   "homepage": "http://serenity-js.org",
@@ -19,8 +19,8 @@
   ],
   "scripts": {
     "clean": "rimraf lib",
-    "lint": "tslint --project=tsconfig.json --config=../../tslint.json --format=prose",
-    "test": "nyc --report-dir=../../target/coverage/core mocha --opts ./mocha.opts 'spec/**/*.spec.*'",
+    "lint": "tslint --project tsconfig.json --config ../../tslint.json --format stylish",
+    "test": "nyc --report-dir ../../target/coverage/core mocha --opts ../../mocha.opts 'spec/**/*.spec.*'",
     "package": "tsc --project tsconfig.json",
     "verify": "npm run clean && npm run lint && npm test && npm run package"
   },
@@ -36,7 +36,6 @@
     "@types/graceful-fs": "2.0.29",
     "@types/lodash": "4.14.55",
     "@types/mkdirp": "0.3.29",
-    "@types/node": "6.0.73",
     "@types/stacktrace-js": "0.0.30"
   },
   "repository": {

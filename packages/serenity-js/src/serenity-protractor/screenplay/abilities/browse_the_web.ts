@@ -50,6 +50,10 @@ export class BrowseTheWeb implements Ability {
         return this.browser.getTitle();
     }
 
+    getCurrentUrl(): PromiseLike<string> {
+        return this.browser.getCurrentUrl();
+    }
+
     actions(): webdriver.ActionSequence {
         return this.browser.actions();
     }
@@ -59,10 +63,18 @@ export class BrowseTheWeb implements Ability {
     }
 
     switchToParentWindow(): PromiseLike<void> {
-        if (! this.parentWindow) {
+        if (!this.parentWindow) {
             throw new Error('This window does not have a parent');
         }
         return this.browser.switchTo().window(this.parentWindow);
+    }
+
+    acceptAlert(): PromiseLike<void> {
+        return this.browser.switchTo().alert().accept();
+    }
+
+    dismissAlert(): PromiseLike<void> {
+        return this.browser.switchTo().alert().dismiss();
     }
 
     switchToWindow(handle: (handles: string[]) => string): PromiseLike<void> {
@@ -81,8 +93,7 @@ export class BrowseTheWeb implements Ability {
 
     wait(condition: webdriver.promise.Promise<any> | webdriver.until.Condition<any> | Function,
          timeout?: number,
-         message?: string): PromiseLike<void>
-    {
+         message?: string): PromiseLike<void> {
         return this.browser.wait(
             condition,
             timeout,
@@ -94,14 +105,20 @@ export class BrowseTheWeb implements Ability {
         return this.browser.waitForAngularEnabled(enable);
     }
 
-    executeScript(script: string, target: Target): PromiseLike<any> {
-        return this.browser.executeScript(script, target.resolveUsing(this.browser.element));
+    executeScript(script: string | Function, ...args: any[]): PromiseLike<any> {
+        return this.browser.executeScript(script, ...args.map(arg => this.resolveTargets(arg)));
     }
 
-    executeAsyncScript(script: string | Function, target: Target, ...args: any[]): PromiseLike<any> {
-        return this.browser.executeAsyncScript(script, target.resolveUsing(this.browser.element), ...args);
+    executeAsyncScript(script: string | Function, ...args: any[]): PromiseLike<any> {
+        return this.browser.executeAsyncScript(script, ...args.map(arg => this.resolveTargets(arg)));
     }
 
     constructor(private browser: ProtractorBrowser) {
+    }
+
+    private resolveTargets(maybeTarget: Target | any) {
+        return maybeTarget instanceof Target
+            ? maybeTarget.resolveUsing(this.browser.element)
+            : maybeTarget;
     }
 }
